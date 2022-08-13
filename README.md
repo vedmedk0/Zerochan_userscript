@@ -1,6 +1,4 @@
 # Zerochan_userscript
-Helps add to favourites faster
+Script for adding pictures to favorites without needing to go to individual page.
+Also it shows if a picture is already in favorites or not.
 
-TODO:
-async parsing of favourites
-better interface
