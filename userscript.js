@@ -5,100 +5,273 @@
 // @license MIT
 // @version 1.0
 // @include https://www.zerochan.net/*
-// @require https://cdn.bootcss.com/jquery/1.12.4/jquery.min.js
-// @require https://cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.js
-// @require https://cdnjs.cloudflare.com/ajax/libs/jquery-json/2.6.0/jquery.json.min.js
 // ==/UserScript==
+const fetchOptions = {
+    method: 'GET',
+    credentials: 'include',
+    mode: 'cors'
+}
 
+const addToFavsProperties = {
+    style: {
+        position: 'absolute',
+        top: '0px',
+        left: '30px'
+    },
+    html: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" class="bi bi-heart" viewBox="0 0 16 16">
+    <path d="m8 2.748-.717-.737C5.6.281 2.514.878 1.4 3.053c-.523 1.023-.641 2.5.314 4.385.92 1.815 2.834 3.989 6.286 6.357 3.452-2.368 5.365-4.542 6.286-6.357.955-1.886.838-3.362.314-4.385C13.486.878 10.4.28 8.717 2.01L8 2.748zM8 15C-7.333 4.868 3.279-3.04 7.824 1.143c.06.055.119.112.176.171a3.12 3.12 0 0 1 .176-.17C12.72-3.042 23.333 4.867 8 15z"/>
+  </svg>`,
+}
 
-(function() {
-    'use strict';
-    //alert('pidor');
-    //$.cookie('favourites', null);
+const removeFromFavsProperties = {
+    style: {
+        position: 'absolute',
+        top: '0px',
+        left: '30px'
+    },
+    html: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" class="bi bi-heart-fill" viewBox="0 0 16 16">
+    <path fill-rule="evenodd" d="M8 1.314C12.438-3.248 23.534 4.735 8 15-7.534 4.736 3.562-3.248 8 1.314z"/>
+  </svg>`,
+}
 
-    //console.log($.evalJSON($.cookie('favourites')))
-    //console.log($.cookie('favourites'))
+const favPagesLimit = 1000;
 
+function arrayToObj(array) {
+    return array.reduce((acc, current) => {
+        acc[current] = true;
+        return acc;
+    }, {});
+}
 
-    if (localStorage.getItem('favourites') == null){// Если куки пустые то делаем объект с пустым листом
-        //TODO: парсить фэйвориты и заполнять лист оттуда
-        var b = parseFavourites()
-        setFavourites(b);
-    }
-    //
+async function toHTMLDocument(response) {
+    const textResponse = await response.text();
+    const htmlResponse = document.createElement('html');
+    htmlResponse.innerHTML = textResponse;
+    return htmlResponse;
+}
 
+function getIDFromHref(href) {
+    const url = new URL(href);
+    const id = url.searchParams.get('id');
+    return id;
+}
 
-    $( "#thumbs2 li" ).each(function( index ) {
-        var id =  $(this).find('a').attr('href').substring(1);
-        var a = getFavourites();
-        //console.log(id);
-        var reference = 'https://www.zerochan.net/fav?id=' + id ;
-        var refElement = $('<a>',{class:'ajax', href:reference})
-        if (a.includes(id)){
-            //$(this).append('<a class="ajax" style="color : red" href="'+reference+'">В избранном</a>');
-            $(this).append(refElement.css('color','red').text('В избранном'))
-        }
-        else{
-            //$(this).append('<a class="ajax" href="'+reference+'">В избранное</a>');
-            $(this).append(refElement.text('В избранное'))
-        }
+function getIDFromNode(node) {
+    return node.querySelector('a').pathname.slice(1);
+}
 
-    });
-    $('body').on('click', 'a.ajax', function(event) // вешаем обработчик на все ссылки
-    {
-        event.preventDefault(); // предотвращаем переход по ссылке
-
-        $.get($(this).attr('href'), function(data) // отправляем GET запрос на href, указанный в ссылке
-              {
-            //console.log(a); //полученные данные не выводим
-        })
-        var id = $(this).attr('href').split('=')[1]; //получаем id из href
-        var a = getFavourites(); // получаем избранные из куков
-        if (a.includes(id)){//если такой айди есть то сносим
-            a.splice( a.indexOf(id), 1 );
-            $(this).removeAttr( 'style' ).text('В избранное');
-        } else{ //иначе добавляем
-            a.push(id);
-            $(this).css('color','red').text('В избранном')
-        }
-        setFavourites(a);//сохраняем в куки
-        //console.log(a);//debug
-     })
-
-
-    function getFavsByPage(pageid){
-       var a
-       var myname = $('#header li').eq(-1).text().split(' ')
-       myname = myname[myname.length - 1]
-        $.ajax({
-            url: "https://www.zerochan.net/fav/"+myname+"?p="+pageid,
-            type: "get",
-            async: false,
-            success: function (data) {
-                a =  $.map($(data).find('#thumbs2 li'),function (el) { return $(el).find('a')[0].pathname.substring(1)})
-        },
-    });
-        return a
-    };
-
-
-    function parseFavourites(){ //заполняем с нуля
-        var flag = true
-        var i
-        var favlist = []
-        for (i=0; flag; i++){ //парсить пока страничка не станет пустой
-            var pagefavs = getFavsByPage(i)
-            if (pagefavs.length > 0 && i < 1000){
-                favlist.push(...getFavsByPage(i))}
-            else {
-                flag = false
-            }
-        };
-        console.log('LOADED FAVOURITES')
-        return favlist
+class Requester {
+    constructor(...urls) {
+        this.urls = urls;
     }
 
-    function getFavourites(){return $.evalJSON(localStorage.getItem('favourites'));}
+    async awaitAll() {
+        const requests = this.urls.map(url => fetch(url, fetchOptions));
+        let results = [];
+        try {
+            results = await Promise.all(requests);
+        } catch (e) {
+            console.error(e);
+        }
+        return results;
+    }
 
-    function setFavourites(newfavs){localStorage.setItem('favourites', $.toJSON(newfavs));}
+    async awaitFirst() {
+        const url = this.urls.shift();
+        let result = null;
+        try {
+            result = await fetch(url, fetchOptions);
+        } catch (e) {
+            console.error(e);
+        }
+        return result;
+    }
+}
+class Page {
+    constructor(document) {
+        this.document = document;
+    }
+    getUsername() {
+        const headerNodes = this.document.querySelectorAll('#header li');
+        const loggedIn = headerNodes[headerNodes.length - 1];
+        const userLink = loggedIn.querySelector('a');
+        const username = userLink.textContent;
+        return username;
+    }
+
+    getPagesNumber() {
+        const pagination = this.document.querySelector('.pagination');
+        const paginationText = pagination.textContent;
+        const paginationNumbers = paginationText.match(/[0-9]+/gi);
+        const pagesNumber = Number(paginationNumbers[1]);
+        return pagesNumber;
+    }
+
+    getFavsIDs() {
+        const favouritesNodes = Array.from(this.document.querySelectorAll('#thumbs2 li'));
+        return favouritesNodes.map(getIDFromNode);
+    }
+}
+
+class FavsParser {
+    constructor() {
+        this.favouritesIDs = {};
+    }
+
+    parseUsername() {
+        const currentPage = new Page(document);
+        return currentPage.getUsername();
+    }
+
+    async parsePagesNumber(username) {
+        const response = await new Requester(`https://www.zerochan.net/fav/${username}`).awaitFirst();
+        const document = await toHTMLDocument(response);
+        return new Page(document).getPagesNumber();
+    }
+
+    async fetchPages(username, pagesNumber) {
+        const urls = [];
+        for (let pageid = 1; pageid <= pagesNumber; pageid++) {
+            urls.push(`https://www.zerochan.net/fav/${username}?p=${pageid}`);
+        }
+        const responses = await new Requester(...urls).awaitAll();
+        const pagePromises = responses.map(async (page) => await toHTMLDocument(page));
+        return Promise.all(pagePromises);
+    }
+
+    parseFavsIDs(pages) {
+        const pagesFavourites = pages.map(page => new Page(page).getFavsIDs());
+        const favouritesIDs = {}
+        pagesFavourites.forEach(pageFavourites => {
+            pageFavourites.forEach((favouriteID) => {
+                favouritesIDs[favouriteID] = true
+            });
+        });
+        return favouritesIDs;
+    }
+
+    async init() {
+        const username = this.parseUsername();
+        const pagesNumber = await this.parsePagesNumber(username);
+        const pages = await this.fetchPages(username, pagesNumber);
+        this.favouritesIDs = this.parseFavsIDs(pages);
+    }
+
+    getFavsIDs() {
+        return this.favouritesIDs;
+    }
+}
+
+class FavsStorage {
+    constructor(favouritesParser) {
+        this.favourites = {};
+        this.storage = localStorage;
+        this.parser = favouritesParser;
+    }
+
+    readStorage() {
+        return JSON.parse(this.storage.getItem('favourites'));
+    }
+
+    async init() {
+        const readFavourites = this.readStorage();
+        if (readFavourites === null) {
+            await this.parser.init();
+            const parsedFavourites = this.parser.getFavsIDs();
+            this.favourites = parsedFavourites;
+            this.saveToStorage();
+        } else {
+            this.favourites = arrayToObj(readFavourites);
+        }
+    }
+
+    saveToStorage() {
+        const objToArray = Object.keys(this.favourites);
+        this.storage.setItem('favourites', JSON.stringify(objToArray));
+    }
+
+    add(id) {
+        this.favourites[id] = true;
+        this.saveToStorage();
+    }
+
+    remove(id) {
+        delete this.favourites[id];
+        this.saveToStorage();
+    }
+
+    has(id) {
+        return id in this.favourites;
+    }
+
+    toggle(id) {
+        if (this.has(id)) {
+            this.remove(id);
+        } else {
+            this.add(id);
+        }
+    }
+}
+
+class Link {
+    constructor(id, storage) {
+        this.id = id;
+        this.storage = storage;
+        this.isInFavs = false;
+        this.href = `https://www.zerochan.net/fav?id=${id}`;
+    }
+
+    init() {
+        this.element = document.createElement('a');
+        this.element.href = this.href;
+        this.addEventListener();
+        this.isInFavs = this.storage.has(this.id);
+        this.setStyle();
+    }
+
+    clickHandler = async (e) => {
+        e.preventDefault();
+        await fetch(this.href, fetchOptions);
+        this.storage.toggle(this.id);
+        this.isInFavs = !this.isInFavs;
+        this.setStyle();
+    }
+
+    addEventListener() {
+        this.element.addEventListener('click', this.clickHandler);
+    }
+    setStyle() {
+        const properties = this.isInFavs ? removeFromFavsProperties : addToFavsProperties;
+        this.element.innerHTML = properties.html;
+        Object.assign(this.element.style, properties.style);
+    }
+
+    getElement() {
+        return this.element;
+    }
+}
+
+function addLinks(storage) {
+    document.querySelectorAll('#thumbs2 li').forEach(node => {
+        const id = getIDFromNode(node);
+        let link = new Link(id, storage);
+        link.init();
+        node.style.position = 'relative';
+        node.append(link.getElement());
+    });
+}
+
+function handleSingleLink(storage) {
+    document.querySelector('a#fav-link').addEventListener('click', (e) => {
+        const id = getIDFromHref(e.target.href);
+        storage.toggle(id);
+    })
+}
+
+const favsParser = new FavsParser();
+const storage = new FavsStorage(favsParser);
+(async function () {
+    await storage.init();
+    addLinks(storage);
+    handleSingleLink(storage);
 })();
